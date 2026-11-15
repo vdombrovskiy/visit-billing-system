@@ -1,7 +1,6 @@
 services:
   db:
     image: postgres:16-alpine
-    container_name: visit-billing-db
     environment:
       POSTGRES_DB: visit_billing
       POSTGRES_USER: app
@@ -15,9 +14,9 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
   rabbitmq:
     image: rabbitmq:4-management
-    container_name: visit-billing-rabbitmq
     environment:
       RABBITMQ_DEFAULT_USER: app
       RABBITMQ_DEFAULT_PASS: app
@@ -30,7 +29,45 @@ services:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+
+  api:
+    build: .
+    env_file:
+      - .env.docker
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  outbox-worker:
+    build: .
+    env_file:
+      - .env.docker
+    command: ["python", "-m", "app.workers.outbox_worker"]
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  billing-consumer:
+    build: .
+    env_file:
+      - .env.docker
+    command: ["python", "-m", "app.modules.billing.consumers.visit_completed_consumer"]
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   postgres_data:
